@@ -11,7 +11,7 @@ local orderId=ARGV[3]
 --2.1.库存key
 local stockKey='seckill:stock:'..vouchId
 --2.2.订单key
-local orderKey='seckill:order'..vouchId
+local orderKey='seckill:order:'..vouchId
 
 --3.脚本业务
 --3.1.判断库存是否充足 get stockKey
@@ -31,6 +31,6 @@ redis.call('incrby',stockKey,-1)
 --3.5.下单
 redis.call('sadd',orderKey,userId)
 --3.6.发送信息到消息队列中,XADD stream.orders * k1 v1 k2 v2 ...
-redis.call('xadd','stream.orders','*','userId',userId,'vouchId',vouchId,'id',orderId)
+redis.call('xadd','stream.orders','*','userId',userId,'voucherId',vouchId,'id',orderId)
 
 return 0
