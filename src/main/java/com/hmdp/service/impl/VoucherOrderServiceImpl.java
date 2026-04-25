@@ -72,8 +72,18 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @PreDestroy
     private void destroy() {
         running = false;
+        // 尝试优雅关闭
         SECKILL_ORDER_EXECUTOR.shutdown();
-        log.info("秒杀订单线程已停止");
+        try {
+            // 等待2秒钟（正好是你 Redis Stream 阻塞的时间），给线程时间走完当前循环
+            if (!SECKILL_ORDER_EXECUTOR.awaitTermination(2, TimeUnit.SECONDS)) {
+                // 如果还未结束，立刻发送中断信号
+                SECKILL_ORDER_EXECUTOR.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            SECKILL_ORDER_EXECUTOR.shutdownNow();
+        }
+        log.info("秒杀订单后台处理线程已完全停止");
     }
 
     private class VoucherOrderHandler implements Runnable {
@@ -109,11 +119,18 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                     //4.ACK确认 SACK stream.orders g1 id
                     stringRedisTemplate.opsForStream().acknowledge(queueName, "g1", record.getId());
                 } catch (Exception e) {
-                    // 终极方案：只要是 Redis 连接关闭/停止，直接安静退出，不报错
                     if (!running) {
-                        // 服务正在关闭，直接退出，不打印日志
+                        break; // 服务正在正常关闭
+                    }
+
+                    // 识别因为应用关闭导致底层的 Lettuce Redis 连接已断开的情况
+                    Throwable cause = e.getCause();
+                    if (cause != null && cause.getMessage() != null
+                            && cause.getMessage().contains("Connection closed")) {
+                        log.info("Redis连接已关闭，停止读取流数据 (正常退出)");
                         break;
                     }
+
                     log.error("处理订单异常", e);
                     handlePendingList();
                 }
